@@ -1,104 +1,125 @@
-import base64
-import os
-import pickle
+"""Microservicio de correo de LigaHub (Flask + Gmail API).
+
+Solo entrega el correo del segundo factor. El código lo genera y lo valida
+ms-security; este servicio no es una autoridad de autenticación.
+"""
+import hmac
+import logging
 import re
-import secrets
-from email.mime.text import MIMEText
-from typing import Any
+import sys
+from typing import Optional
 
 from flask import Flask, jsonify, request
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+
+from config import Settings
+from mailer import (
+    GmailMailer,
+    MailConfigError,
+    MailSendError,
+    build_two_factor_message,
+    load_logo,
+)
+from ratelimit import RateLimiter
+
+EMAIL_PATTERN = re.compile(
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+"
+)
+CODE_PATTERN = re.compile(r"\d{6}")
+ALLOWED_FIELDS = {"email", "code", "expires_minutes"}
+MAX_EMAIL_LENGTH = 254
 
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CREDENTIALS_DIR = os.path.join(BASE_DIR, "credentials")
-CLIENT_SECRET_FILE = os.path.join(CREDENTIALS_DIR, "credentials.json")
-TOKEN_FILE = os.path.join(CREDENTIALS_DIR, "token.pickle")
-SENDER_EMAIL = os.getenv("GMAIL_SENDER", "miguel.cruz40196@ucaldas.edu.co")
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-app = Flask(__name__)
+def mask_email(address: str) -> str:
+    """ab***@dominio: suficiente para trazar sin guardar el correo completo."""
+    local, _, domain = address.partition("@")
+    return f"{local[:2]}***@{domain}"
 
 
-def authenticate_gmail() -> Any:
-    """Obtiene credenciales Gmail y las guarda para futuras solicitudes."""
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "rb") as token:
-            creds = pickle.load(token)
+def create_app(settings: Optional[Settings] = None, mailer=None) -> Flask:
+    settings = settings or Settings.from_env()
+    mailer = mailer or GmailMailer(settings.credentials_dir)
+    limiter = RateLimiter()
+    logo = load_logo()
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists(CLIENT_SECRET_FILE):
-                raise FileNotFoundError(
-                    f"No se encontró el archivo de credenciales: {CLIENT_SECRET_FILE}"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CLIENT_SECRET_FILE, SCOPES
+    app = Flask(__name__)
+    app.logger.setLevel(logging.INFO)
+
+    def error(message: str, status: int):
+        return jsonify(error=message), status
+
+    @app.post("/api/2fa/send")
+    def send_2fa_code():
+        if not settings.api_key or not settings.sender:
+            app.logger.error("Servicio sin EMAIL_SERVICE_API_KEY o GMAIL_SENDER configurados")
+            return error("El servicio de correo no está configurado.", 500)
+
+        client_ip = request.remote_addr or "desconocida"
+        if not limiter.allow(f"ip:{client_ip}", settings.rate_per_ip, settings.rate_window_seconds):
+            return error("Demasiadas solicitudes.", 429)
+
+        provided = request.headers.get("X-Service-Key", "")
+        if not hmac.compare_digest(provided.encode("utf-8"), settings.api_key.encode("utf-8")):
+            app.logger.warning("Solicitud rechazada: clave de servicio inválida")
+            return error("No autorizado.", 401)
+
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != ALLOWED_FIELDS:
+            return error("Cuerpo inválido.", 400)
+
+        recipient = payload["email"]
+        code = payload["code"]
+        minutes = payload["expires_minutes"]
+
+        if (
+            not isinstance(recipient, str)
+            or len(recipient) > MAX_EMAIL_LENGTH
+            or not EMAIL_PATTERN.fullmatch(recipient)
+            or not isinstance(code, str)
+            or not CODE_PATTERN.fullmatch(code)
+            or not isinstance(minutes, int)
+            or isinstance(minutes, bool)
+            or not 1 <= minutes <= 30
+        ):
+            return error("Datos inválidos.", 400)
+
+        if not limiter.allow(
+            f"to:{recipient.lower()}", settings.rate_per_recipient, settings.rate_window_seconds
+        ):
+            return error("Demasiadas solicitudes.", 429)
+
+        try:
+            message = build_two_factor_message(
+                to=recipient,
+                sender=settings.sender,
+                code=code,
+                expires_minutes=minutes,
+                logo_bytes=logo,
             )
-            creds = flow.run_local_server(port=0)
+            mailer.send(message)
+        except MailConfigError as exc:
+            app.logger.error("Gmail no configurado: %s", exc)
+            return error("El servicio de correo no está configurado.", 500)
+        except MailSendError as exc:
+            # Solo el tipo de fallo: el detalle del proveedor puede incluir datos de la petición.
+            app.logger.error("Gmail no pudo enviar el correo (%s)", exc)
+            return error("No fue posible enviar el correo.", 502)
 
-        os.makedirs(CREDENTIALS_DIR, exist_ok=True)
-        with open(TOKEN_FILE, "wb") as token:
-            pickle.dump(creds, token)
+        app.logger.info("Correo 2FA enviado a %s", mask_email(recipient))
+        return jsonify(message="Correo enviado."), 200
 
-    return creds
-
-
-def create_message_html(to: str, code: str) -> dict[str, str]:
-    html_content = f"""
-    <html>
-      <body>
-        <h2>Código de autenticación 2FA</h2>
-        <p>Tu código de autenticación es:</p>
-        <p style="font-size: 28px; font-weight: bold; letter-spacing: 6px;">
-          {code}
-        </p>
-        <p>Este código es válido únicamente durante el periodo definido por tu aplicación.</p>
-      </body>
-    </html>
-    """
-    message = MIMEText(html_content, "html", "utf-8")
-    message["to"] = to
-    message["from"] = SENDER_EMAIL
-    message["subject"] = "Código de autenticación 2FA"
-    raw_message = base64.urlsafe_b64encode(message.as_bytes())
-    return {"raw": raw_message.decode("utf-8")}
+    return app
 
 
-def generate_2fa_code() -> str:
-    return f"{secrets.randbelow(1_000_000):06d}"
+def main(argv: list) -> None:
+    settings = Settings.from_env()
 
+    if "--authorize" in argv:
+        GmailMailer(settings.credentials_dir).authorize_interactively()
+        print("Gmail autorizado. Se guardó token.pickle en la carpeta de credenciales.")
+        return
 
-@app.post("/api/2fa/send")
-def send_2fa_code():
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify(error="El cuerpo debe ser un JSON válido."), 400
-
-    recipient = payload.get("email")
-    if not isinstance(recipient, str) or not EMAIL_PATTERN.fullmatch(recipient):
-        return jsonify(error="El campo 'email' debe ser un correo válido."), 400
-
-    try:
-        service = build("gmail", "v1", credentials=authenticate_gmail())
-        service.users().messages().send(
-            userId="me", body=create_message_html(recipient, generate_2fa_code())
-        ).execute()
-    except (FileNotFoundError, OSError) as exc:
-        app.logger.error("No fue posible configurar Gmail: %s", exc)
-        return jsonify(error="El servicio de correo no está configurado."), 500
-    except Exception:
-        app.logger.exception("No fue posible enviar el código 2FA.")
-        return jsonify(error="No fue posible enviar el correo."), 502
-
-    return jsonify(message="Código 2FA enviado correctamente."), 200
+    create_app(settings).run(host=settings.host, port=settings.port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    main(sys.argv[1:])

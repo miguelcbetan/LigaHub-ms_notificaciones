@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>Tu código de verificación de LigaHub</title>
+</head>
+<!-- Identidad de LigaHub: azul #003893, amarillo #fcd116, rojo #ce1126, neutros zinc. Inter no se
+     carga en la mayoría de clientes de correo, por eso la pila termina en fuentes del sistema. -->
+<body style="margin:0;padding:0;background-color:#fafafa;-webkit-text-size-adjust:100%;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#fafafa;">
+    Tu código de verificación vence en {{ expires_minutes }} minutos.
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fafafa;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="max-width:560px;background-color:#ffffff;border:1px solid #e4e4e7;border-radius:16px;overflow:hidden;">
+          <!-- Franja tricolor 2:1:1 -->
+          <tr>
+            <td style="padding:0;font-size:0;line-height:0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td width="50%" height="4" style="background-color:#fcd116;font-size:0;line-height:0;height:4px;">&nbsp;</td>
+                  <td width="25%" height="4" style="background-color:#003893;font-size:0;line-height:0;height:4px;">&nbsp;</td>
+                  <td width="25%" height="4" style="background-color:#ce1126;font-size:0;line-height:0;height:4px;">&nbsp;</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Marca -->
+          <tr>
+            <td style="padding:24px 28px 0 28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  {% if has_logo %}
+                  <td valign="middle" style="padding-right:12px;">
+                    <img src="cid:logo" width="44" height="44" alt="LigaHub" style="display:block;width:44px;height:44px;border:0;">
+                  </td>
+                  {% endif %}
+                  <td valign="middle" style="font-family:Inter,'Segoe UI',Arial,Helvetica,sans-serif;">
+                    <div style="font-size:22px;line-height:24px;font-weight:800;color:#18181b;">Liga<span style="color:#003893;">Hub</span></div>
+                    <div style="font-size:10px;line-height:14px;letter-spacing:1.5px;color:#71717a;">GESTIÓN DEPORTIVA</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Contenido -->
+          <tr>
+            <td style="padding:24px 28px 8px 28px;font-family:Inter,'Segoe UI',Arial,Helvetica,sans-serif;color:#18181b;">
+              <h1 style="margin:0 0 12px 0;font-size:24px;line-height:30px;font-weight:700;color:#18181b;">Tu código de verificación</h1>
+              <p style="margin:0 0 20px 0;font-size:15px;line-height:23px;color:#3f3f46;">
+                Usa este código para completar tu inicio de sesión en LigaHub. Ingresa los seis dígitos en la pantalla de verificación.
+              </p>
+            </td>
+          </tr>
+          <!-- Código -->
+          <tr>
+            <td align="center" style="padding:0 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="background-color:#fafafa;border:1px solid #e4e4e7;border-radius:12px;">
+                <tr>
+                  <td align="center" style="padding:20px 8px;font-family:'SFMono-Regular',Menlo,Consolas,'Courier New',monospace;font-size:34px;line-height:40px;font-weight:700;letter-spacing:8px;color:#003893;">
+                    {{ code }}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 28px 8px 28px;font-family:Inter,'Segoe UI',Arial,Helvetica,sans-serif;">
+              <p style="margin:0 0 6px 0;font-size:14px;line-height:21px;color:#3f3f46;">
+                <strong>Vence en {{ expires_minutes }} minutos</strong> y solo se puede usar una vez.
+              </p>
+              <p style="margin:0;font-size:13px;line-height:20px;color:#71717a;">
+                Solicitado el {{ requested_at }}.
+              </p>
+            </td>
+          </tr>
+          <!-- Aviso de seguridad -->
+          <tr>
+            <td style="padding:16px 28px 28px 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="background-color:#fafafa;border-left:4px solid #fcd116;border-radius:6px;">
+                <tr>
+                  <td style="padding:14px 16px;font-family:Inter,'Segoe UI',Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#3f3f46;">
+                    <strong style="color:#18181b;">¿No fuiste tú?</strong><br>
+                    Ignora este correo: sin el código nadie puede entrar a tu cuenta. Te recomendamos cambiar tu contraseña.
+                    LigaHub nunca te pedirá este código por teléfono, chat ni correo.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Pie -->
+          <tr>
+            <td align="center" style="padding:18px 28px;border-top:1px solid #e4e4e7;font-family:Inter,'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#71717a;">
+              © 2026 LigaHub · Hecho con pasión cafetera<br>
+              Este es un mensaje automático; no respondas a este correo.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

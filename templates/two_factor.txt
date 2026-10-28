@@ -1,0 +1,20 @@
+LigaHub · Gestión deportiva
+============================
+
+Tu código de verificación
+
+Usa este código para completar tu inicio de sesión en LigaHub:
+
+    {{ code }}
+
+El código vence en {{ expires_minutes }} minutos y solo se puede usar una vez.
+Solicitado el {{ requested_at }}.
+
+¿No fuiste tú?
+Si no intentaste iniciar sesión, ignora este correo: sin el código nadie puede
+entrar a tu cuenta. Te recomendamos cambiar tu contraseña. LigaHub nunca te
+pedirá este código por teléfono, chat ni correo.
+
+--
+© 2026 LigaHub · Hecho con pasión cafetera
+Este es un mensaje automático; no respondas a este correo.
