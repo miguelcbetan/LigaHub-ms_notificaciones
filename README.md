@@ -1,6 +1,6 @@
 # emails_google
 
-Microservicio Flask de LigaHub que entrega por Gmail el correo del segundo factor (2FA). **No autentica usuarios**: el código lo genera, guarda (solo su HMAC), expira y valida `ms-security`; este servicio únicamente envía el mensaje.
+Microservicio Flask de LigaHub que entrega por Gmail los correos de segundo factor (2FA) y recuperación de contraseña. **No autentica usuarios**: `ms-security` genera y valida los códigos y tokens; este servicio únicamente entrega los mensajes.
 
 ## Contrato
 
@@ -16,7 +16,19 @@ Microservicio Flask de LigaHub que entrega por Gmail el correo del segundo facto
 
 Respuestas: `200` enviado · `400` datos inválidos · `401` clave de servicio ausente o incorrecta · `429` límite de envíos · `500` servicio sin configurar o Gmail sin autorizar · `502` Gmail no pudo enviar. Los errores nunca incluyen detalles del proveedor.
 
-Seguridad: clave compartida comparada en tiempo constante, límite de envíos por IP y por destinatario (en memoria, una sola instancia), escucha solo en `127.0.0.1` por defecto, y los logs no contienen el código, la clave ni el correo completo (se enmascara como `ab***@dominio`).
+Seguridad: clave compartida comparada en tiempo constante, límite de envíos por IP y por destinatario (en memoria, una sola instancia), escucha solo en `127.0.0.1` por defecto, y los logs no contienen códigos, tokens, URL de recuperación, claves ni correos completos (se enmascara como `ab***@dominio`).
+
+`POST /api/password-reset/send`
+
+| Elemento | Valor |
+|---|---|
+| Cabecera obligatoria | `X-Service-Key: <EMAIL_SERVICE_API_KEY>` |
+| Cuerpo (JSON, solo estos 3 campos) | `{"email":"usuario@dominio.com","reset_url":"http://localhost:3000/recuperar?token=...","expires_minutes":15}` |
+| `email` | texto, máx. 254 caracteres y con formato de correo |
+| `reset_url` | URL absoluta HTTPS; HTTP solo se acepta para `localhost` o una dirección IP de loopback (desarrollo local). No se aceptan credenciales embebidas en la URL. |
+| `expires_minutes` | entero entre 1 y 30 |
+
+Respuestas y mecanismo de autenticación: los mismos códigos HTTP y la misma clave compartida que `POST /api/2fa/send`. Los límites por IP y destinatario también aplican a esta ruta y se comparten con 2FA. El servicio no genera, valida ni registra el token ni la URL de recuperación; en los logs solo aparece el destinatario enmascarado.
 
 ## Estructura
 
@@ -25,7 +37,7 @@ app.py            rutas Flask y arranque (create_app)
 config.py         variables de entorno -> Settings
 mailer.py         construcción del mensaje (texto + HTML) y envío por Gmail API
 ratelimit.py      límite de envíos en ventana deslizante
-templates/        two_factor.html / two_factor.txt (presentación, separada de la lógica)
+templates/        plantillas two_factor.* y password_reset.* (presentación, separada de la lógica)
 assets/logo.png   logo embebido en el correo (CID)
 tests/            pruebas con pytest (Gmail simulado)
 ```

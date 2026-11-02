@@ -81,6 +81,37 @@ def build_two_factor_message(
     return message
 
 
+def build_password_reset_message(
+    to: str,
+    sender: str,
+    reset_url: str,
+    expires_minutes: int,
+    logo_bytes: Optional[bytes] = None,
+) -> EmailMessage:
+    """Correo de recuperación multipart: texto plano + HTML con logo opcional."""
+    context = {
+        "reset_url": reset_url,
+        "expires_minutes": expires_minutes,
+        "has_logo": logo_bytes is not None,
+    }
+
+    message = EmailMessage()
+    message["To"] = to
+    message["From"] = sender
+    message["Subject"] = "Restablece tu contraseña de LigaHub"
+
+    message.set_content(_text_env.get_template("password_reset.txt").render(**context))
+    message.add_alternative(
+        _html_env.get_template("password_reset.html").render(**context),
+        subtype="html",
+    )
+    if logo_bytes is not None:
+        html_part = message.get_payload()[1]
+        html_part.add_related(logo_bytes, "image", "png", cid="<logo>")
+
+    return message
+
+
 def load_logo() -> Optional[bytes]:
     try:
         with open(LOGO_FILE, "rb") as handle:

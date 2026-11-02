@@ -1,13 +1,15 @@
 """Microservicio de correo de LigaHub (Flask + Gmail API).
 
-Solo entrega el correo del segundo factor. El código lo genera y lo valida
-ms-security; este servicio no es una autoridad de autenticación.
+Solo entrega mensajes: ms-security genera y valida códigos y tokens; este
+servicio no es una autoridad de autenticación.
 """
 import hmac
+import ipaddress
 import logging
 import re
 import sys
 from typing import Optional
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, request
 
@@ -16,6 +18,7 @@ from mailer import (
     GmailMailer,
     MailConfigError,
     MailSendError,
+    build_password_reset_message,
     build_two_factor_message,
     load_logo,
 )
@@ -26,6 +29,7 @@ EMAIL_PATTERN = re.compile(
 )
 CODE_PATTERN = re.compile(r"\d{6}")
 ALLOWED_FIELDS = {"email", "code", "expires_minutes"}
+PASSWORD_RESET_FIELDS = {"email", "reset_url", "expires_minutes"}
 MAX_EMAIL_LENGTH = 254
 
 
@@ -33,6 +37,37 @@ def mask_email(address: str) -> str:
     """ab***@dominio: suficiente para trazar sin guardar el correo completo."""
     local, _, domain = address.partition("@")
     return f"{local[:2]}***@{domain}"
+
+
+def is_accepted_reset_url(value: str) -> bool:
+    """Acepta HTTPS y HTTP solo para destinos de loopback de desarrollo local."""
+    if not value or any(ord(char) <= 0x20 or ord(char) == 0x7F for char in value) or "\\" in value:
+        return False
+
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        parsed.port  # fuerza la validación del formato y rango del puerto
+    except ValueError:
+        return False
+
+    if (
+        parsed.scheme not in {"https", "http"}
+        or not parsed.netloc
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return False
+
+    if parsed.scheme == "https":
+        return True
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 def create_app(settings: Optional[Settings] = None, mailer=None) -> Flask:
@@ -105,6 +140,65 @@ def create_app(settings: Optional[Settings] = None, mailer=None) -> Flask:
             return error("No fue posible enviar el correo.", 502)
 
         app.logger.info("Correo 2FA enviado a %s", mask_email(recipient))
+        return jsonify(message="Correo enviado."), 200
+
+    @app.post("/api/password-reset/send")
+    def send_password_reset():
+        if not settings.api_key or not settings.sender:
+            app.logger.error("Servicio sin EMAIL_SERVICE_API_KEY o GMAIL_SENDER configurados")
+            return error("El servicio de correo no está configurado.", 500)
+
+        client_ip = request.remote_addr or "desconocida"
+        if not limiter.allow(f"ip:{client_ip}", settings.rate_per_ip, settings.rate_window_seconds):
+            return error("Demasiadas solicitudes.", 429)
+
+        provided = request.headers.get("X-Service-Key", "")
+        if not hmac.compare_digest(provided.encode("utf-8"), settings.api_key.encode("utf-8")):
+            app.logger.warning("Solicitud rechazada: clave de servicio inválida")
+            return error("No autorizado.", 401)
+
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != PASSWORD_RESET_FIELDS:
+            return error("Cuerpo inválido.", 400)
+
+        recipient = payload["email"]
+        reset_url = payload["reset_url"]
+        minutes = payload["expires_minutes"]
+
+        if (
+            not isinstance(recipient, str)
+            or len(recipient) > MAX_EMAIL_LENGTH
+            or not EMAIL_PATTERN.fullmatch(recipient)
+            or not isinstance(reset_url, str)
+            or not is_accepted_reset_url(reset_url)
+            or not isinstance(minutes, int)
+            or isinstance(minutes, bool)
+            or not 1 <= minutes <= 30
+        ):
+            return error("Datos inválidos.", 400)
+
+        if not limiter.allow(
+            f"to:{recipient.lower()}", settings.rate_per_recipient, settings.rate_window_seconds
+        ):
+            return error("Demasiadas solicitudes.", 429)
+
+        try:
+            message = build_password_reset_message(
+                to=recipient,
+                sender=settings.sender,
+                reset_url=reset_url,
+                expires_minutes=minutes,
+                logo_bytes=logo,
+            )
+            mailer.send(message)
+        except MailConfigError:
+            app.logger.error("Gmail no está configurado para enviar el correo de recuperación")
+            return error("El servicio de correo no está configurado.", 500)
+        except MailSendError:
+            app.logger.error("Gmail no pudo enviar el correo de recuperación")
+            return error("No fue posible enviar el correo.", 502)
+
+        app.logger.info("Correo de recuperación enviado a %s", mask_email(recipient))
         return jsonify(message="Correo enviado."), 200
 
     return app
